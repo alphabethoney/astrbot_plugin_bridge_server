@@ -1,0 +1,19 @@
+name: 语法检查
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: 报告 Python 版本
+        run: python -V
+      - name: 逐个文件做语法检查
+        run: python -m compileall -q .
