@@ -1,0 +1,8 @@
+name: astrbot_plugin_bridge_server
+display_name: 桥服务器端插件
+desc: 通过 SSH 调用 Windows 端 runner.py，把 /wg /wc /wl /ww /wx 聊天指令转成对远端 CLI agent 的提交、查看、取消，并轮询事件播报进度
+version: v1.0.0
+author: alphabethoney
+repo: ""
+support_platforms:
+  - aiocqhttp

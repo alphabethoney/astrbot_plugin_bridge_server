@@ -1,0 +1,20 @@
+{
+  "out": "dashboard_snapshot.json",
+  "ssh": {
+    "host": "192.168.1.100",
+    "port": 22,
+    "user": "your_user",
+    "work_dir": "D:\\path\\to\\agent",
+    "python": "python"
+  },
+  "local_agents": ["dsh", "codex", "astrbot"],
+  "inspection": {
+    "marker": "",
+    "fresh_hours": 24
+  },
+  "tunnel": {
+    "host": "192.168.1.100",
+    "port": 22
+  },
+  "plugins_dir": ""
+}

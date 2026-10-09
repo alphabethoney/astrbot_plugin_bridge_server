@@ -1,0 +1,79 @@
+{
+  "ssh": {
+    "type": "object",
+    "description": "SSH 连接参数（目标 Windows 桥）",
+    "items": {
+      "host": {
+        "type": "string",
+        "description": "目标主机地址",
+        "default": "192.168.1.100"
+      },
+      "port": {
+        "type": "int",
+        "description": "SSH 端口",
+        "default": 22
+      },
+      "user": {
+        "type": "string",
+        "description": "SSH 用户名",
+        "default": "your_user"
+      },
+      "work_dir": {
+        "type": "string",
+        "description": "远端工作目录（runner.py 所在目录）",
+        "default": "D:\\path\\to\\agent"
+      },
+      "python": {
+        "type": "string",
+        "description": "远端 Python 解释器命令",
+        "default": "python"
+      }
+    }
+  },
+  "poll_interval": {
+    "type": "int",
+    "description": "轮询间隔（秒）",
+    "default": 15
+  },
+  "announce_interval": {
+    "type": "int",
+    "description": "播报限频间隔（秒）",
+    "default": 30
+  },
+  "default_permission": {
+    "type": "string",
+    "description": "默认权限档",
+    "default": "workspace-write",
+    "options": ["read-only", "workspace-write", "danger-full-access"]
+  },
+  "default_timeout_s": {
+    "type": "int",
+    "description": "任务默认超时（秒）",
+    "default": 600
+  },
+  "max_text_len": {
+    "type": "int",
+    "description": "单条播报最大字符数",
+    "default": 1500
+  },
+  "allowed_sessions": {
+    "type": "list",
+    "description": "允许使用插件的会话（unified_msg_origin，做包含匹配），留空表示不限制",
+    "default": []
+  },
+  "ssh_timeout_s": {
+    "type": "int",
+    "description": "单次 SSH 调用超时（秒）",
+    "default": 30
+  },
+  "verbose": {
+    "type": "bool",
+    "description": "是否额外播报思考过程等细节事件",
+    "default": false
+  },
+  "snapshot_path": {
+    "type": "string",
+    "description": "任务仪表盘快照文件路径（由 collect_dashboard.py 生成），留空则使用插件目录下的 dashboard_snapshot.json",
+    "default": ""
+  }
+}
