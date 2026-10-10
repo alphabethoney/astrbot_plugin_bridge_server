@@ -31,6 +31,7 @@ class BridgeConfig:
         "ssh_timeout_s": 30,
         "verbose": False,
         "snapshot_path": "",
+        "stale_seconds": 600,
     }
 
     def __init__(self, config=None):
@@ -120,6 +121,11 @@ class BridgeConfig:
     def snapshot_path(self):
         """任务仪表盘快照文件路径（由 collect_dashboard.py 生成）。留空用插件目录默认值。"""
         return str(self._raw("snapshot_path", self.DEFAULTS["snapshot_path"]) or "")
+
+    @property
+    def stale_seconds(self):
+        """任务仪表盘快照超过这么多秒提示可能过期。"""
+        return self._int("stale_seconds", minimum=1)
 
     @property
     def verbose(self):

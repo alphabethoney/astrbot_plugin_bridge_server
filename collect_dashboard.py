@@ -17,6 +17,7 @@ import argparse
 import json
 import logging
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -304,6 +305,19 @@ def main():
         "bridge": collect_bridge(cfg.get("ssh") or {}),
         "resident": collect_resident(cfg),
     }
+
+    # 归档旧快照：每次采集前把上一份拷进 snapshots/ 子目录，保留最近 20 份历史
+    if os.path.exists(out_path):
+        archive_dir = os.path.join(os.path.dirname(out_path), "snapshots")
+        os.makedirs(archive_dir, exist_ok=True)
+        ts = time.strftime("%Y%m%d_%H%M%S")
+        shutil.copy2(out_path, os.path.join(archive_dir, "dashboard_snapshot_%s.json" % ts))
+        archived = sorted(fn for fn in os.listdir(archive_dir) if fn.endswith(".json"))
+        for old in archived[:-20]:
+            try:
+                os.remove(os.path.join(archive_dir, old))
+            except OSError:
+                pass
 
     tmp = out_path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:

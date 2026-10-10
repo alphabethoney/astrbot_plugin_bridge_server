@@ -188,7 +188,8 @@ def render(snap, stale=False):
 
 
 class Dashboard:
-    def __init__(self, snapshot_path=None):
+    def __init__(self, snapshot_path=None, stale_seconds=STALE_S):
+        self.stale_seconds = stale_seconds
         if snapshot_path:
             self.path = snapshot_path
         else:
@@ -205,4 +206,4 @@ class Dashboard:
             return "任务仪表盘：暂无快照数据（请先运行 collect_dashboard.py）"
         except Exception as e:
             return "任务仪表盘：读取快照失败：%s" % e
-        return render(snap, stale=time.time() - mtime > STALE_S)
+        return render(snap, stale=time.time() - mtime > self.stale_seconds)

@@ -75,5 +75,10 @@
     "type": "string",
     "description": "任务仪表盘快照文件路径（由 collect_dashboard.py 生成），留空则使用插件目录下的 dashboard_snapshot.json",
     "default": ""
+  },
+  "stale_seconds": {
+    "type": "int",
+    "description": "任务仪表盘快照超过这么多秒提示可能过期",
+    "default": 600
   }
 }

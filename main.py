@@ -38,7 +38,7 @@ class BridgeServer(Star):
             timeout=self._cfg.ssh_timeout_s,
         )
         self.table = TaskTable()
-        self.dashboard = Dashboard(self._cfg.snapshot_path)
+        self.dashboard = Dashboard(self._cfg.snapshot_path, self._cfg.stale_seconds)
         self.announcer = Announcer(
             interval=self._cfg.announce_interval,
             max_len=self._cfg.max_text_len,
@@ -72,27 +72,45 @@ class BridgeServer(Star):
     @filter.command("wl")
     async def wl(self, event: AstrMessageEvent):
         """列出远端任务。"""
+        if denied := self._session_denied(event):
+            yield event.plain_result(denied)
+            return
         yield event.plain_result(await self._list_tasks())
 
     @filter.command("ww")
     async def ww(self, event: AstrMessageEvent, message: str = ""):
         """查看任务进度。"""
+        if denied := self._session_denied(event):
+            yield event.plain_result(denied)
+            return
         yield event.plain_result(await self._watch_progress(event, message))
 
     @filter.command("wx")
     async def wx(self, event: AstrMessageEvent, message: str = ""):
         """取消任务。"""
+        if denied := self._session_denied(event):
+            yield event.plain_result(denied)
+            return
         yield event.plain_result(await self._cancel(event, message))
 
     @filter.command("wd")
     async def wd(self, event: AstrMessageEvent):
         """任务仪表盘（纯本地读快照，不发起 SSH）。"""
+        if denied := self._session_denied(event):
+            yield event.plain_result(denied)
+            return
         yield event.plain_result(self.dashboard.render())
 
     # ---------------------------------------------------------------- 实现
     @staticmethod
     def _session(event) -> str:
         return str(getattr(event, "unified_msg_origin", "") or "")
+
+    def _session_denied(self, event) -> str:
+        """会话白名单校验，未授权返回提示串，否则返回空串。"""
+        if not self._cfg.session_allowed(self._session(event)):
+            return "该会话未被授权使用桥"
+        return ""
 
     async def _submit(self, event, agent, message):
         session = self._session(event)
