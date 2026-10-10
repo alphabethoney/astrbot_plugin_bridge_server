@@ -75,7 +75,7 @@ class BridgeServer(Star):
         if denied := self._session_denied(event):
             yield event.plain_result(denied)
             return
-        yield event.plain_result(await self._list_tasks())
+        yield event.plain_result(await self._list_tasks(event))
 
     @filter.command("ww")
     async def ww(self, event: AstrMessageEvent, message: str = ""):
@@ -101,6 +101,132 @@ class BridgeServer(Star):
             return
         yield event.plain_result(self.dashboard.render())
 
+    @filter.command("nt")
+    async def nt(self, event: AstrMessageEvent, message: str = ""):
+        """新建任务会话并提交桥任务。"""
+        if denied := self._session_denied(event):
+            yield event.plain_result(denied)
+            return
+        prompt = (message or "").strip()
+        if not prompt:
+            yield event.plain_result("用法：/nt <任务描述>")
+            return
+        umo = self._session(event)
+        cm = getattr(self.context, "conversation_manager", None)
+        if cm is None:
+            yield event.plain_result("conversation 管理器不可用")
+            return
+        try:
+            cid = await cm.new_conversation(umo, event.get_platform_id(), persona_id="运维")
+            title = prompt[:12]
+            await cm.update_conversation_title(umo, title, conversation_id=cid)
+        except Exception as e:
+            yield event.plain_result(f"建任务会话失败：{e}")
+            return
+        req = {
+            "agent": "dsh",
+            "cwd": self._cfg.work_dir,
+            "prompt": prompt,
+            "permission": self._cfg.default_permission,
+            "timeout_s": self._cfg.default_timeout_s,
+        }
+        try:
+            task_id = await self.dispatch.submit(req)
+        except SshError as e:
+            yield event.plain_result(f"提交失败：{e}")
+            return
+        except Exception as e:
+            yield event.plain_result(f"提交异常：{e}")
+            return
+        if not task_id:
+            yield event.plain_result("提交失败：未拿到 task_id")
+            return
+        self.table.add(task_id, "dsh", prompt, umo, conversation_id=cid)
+        yield event.plain_result(f"已建任务「{title}」#{cid[:4]}，task {task_id} 已提交")
+
+    @filter.command("switch")
+    async def switch(self, event: AstrMessageEvent, message: str = ""):
+        """切换任务会话。"""
+        if denied := self._session_denied(event):
+            yield event.plain_result(denied)
+            return
+        umo = self._session(event)
+        key = (message or "").strip()
+        if not key:
+            yield event.plain_result(await self._list_conversations(umo))
+            return
+        cid = await self._resolve_cid(umo, key)
+        if not cid:
+            yield event.plain_result(f"找不到任务「{key}」，用 /tasks 看看")
+            return
+        cm = getattr(self.context, "conversation_manager", None)
+        if cm is None:
+            yield event.plain_result("conversation 管理器不可用")
+            return
+        try:
+            await cm.switch_conversation(umo, cid)
+        except Exception as e:
+            yield event.plain_result(f"切换失败：{e}")
+            return
+        yield event.plain_result(f"已切换到任务 #{cid[:4]}")
+
+    @filter.command("tasks")
+    async def tasks(self, event: AstrMessageEvent):
+        """列出本会话的任务会话。"""
+        if denied := self._session_denied(event):
+            yield event.plain_result(denied)
+            return
+        yield event.plain_result(await self._list_conversations(self._session(event)))
+
+    @filter.command("close")
+    async def close(self, event: AstrMessageEvent, message: str = ""):
+        """关闭任务会话。"""
+        if denied := self._session_denied(event):
+            yield event.plain_result(denied)
+            return
+        umo = self._session(event)
+        key = (message or "").strip()
+        cm = getattr(self.context, "conversation_manager", None)
+        if cm is None:
+            yield event.plain_result("conversation 管理器不可用")
+            return
+        cid = await self._resolve_cid(umo, key) if key else await self._cur_cid(event)
+        if not cid:
+            yield event.plain_result("找不到要关闭的任务会话")
+            return
+        try:
+            await cm.delete_conversation(umo, cid)
+        except Exception as e:
+            yield event.plain_result(f"关闭失败：{e}")
+            return
+        yield event.plain_result(f"已关闭任务会话 #{cid[:4]}")
+
+    @filter.command("rename")
+    async def rename(self, event: AstrMessageEvent, message: str = ""):
+        """改名当前任务会话。"""
+        if denied := self._session_denied(event):
+            yield event.plain_result(denied)
+            return
+        title = (message or "").strip()
+        if not title:
+            yield event.plain_result("用法：/rename <新名>")
+            return
+        umo = self._session(event)
+        cid = await self._cur_cid(event)
+        if not cid:
+            yield event.plain_result("当前没有任务会话")
+            return
+        cm = getattr(self.context, "conversation_manager", None)
+        if cm is None:
+            yield event.plain_result("conversation 管理器不可用")
+            return
+        try:
+            await cm.update_conversation_title(umo, title, conversation_id=cid)
+        except Exception as e:
+            yield event.plain_result(f"改名失败：{e}")
+            return
+        yield event.plain_result(f"已改名为「{title}」")
+
     # ---------------------------------------------------------------- 实现
     @staticmethod
     def _session(event) -> str:
@@ -111,6 +237,51 @@ class BridgeServer(Star):
         if not self._cfg.session_allowed(self._session(event)):
             return "该会话未被授权使用桥"
         return ""
+
+    async def _cur_cid(self, event) -> str:
+        """取当前对话（conversation）ID，任务按对话隔离。"""
+        try:
+            cm = getattr(self.context, "conversation_manager", None)
+            if cm is None:
+                return ""
+            return (await cm.get_curr_conversation_id(self._session(event))) or ""
+        except Exception:
+            return ""
+
+    async def _resolve_cid(self, umo: str, key: str) -> str:
+        """按对话 id 前缀或标题匹配一个 conversation_id。"""
+        try:
+            cm = getattr(self.context, "conversation_manager", None)
+            if cm is None:
+                return ""
+            convs = await cm.get_conversations(umo)
+        except Exception:
+            return ""
+        key = key.strip().lower()
+        for c in convs:
+            cid = getattr(c, "cid", "") or ""
+            title = (getattr(c, "title", "") or "").lower()
+            if cid.startswith(key) or key in title:
+                return cid
+        return ""
+
+    async def _list_conversations(self, umo: str) -> str:
+        """列出本会话的任务对话。"""
+        try:
+            cm = getattr(self.context, "conversation_manager", None)
+            if cm is None:
+                return "conversation 管理器不可用"
+            convs = await cm.get_conversations(umo)
+        except Exception as e:
+            return f"获取任务列表失败：{e}"
+        if not convs:
+            return "暂无任务会话，用 /nt 建一个"
+        lines = []
+        for c in convs[:20]:
+            cid = getattr(c, "cid", "") or ""
+            title = getattr(c, "title", "") or "(无标题)"
+            lines.append(f"#{cid[:4]} {title}")
+        return "任务会话：\n" + "\n".join(lines)
 
     async def _submit(self, event, agent, message):
         session = self._session(event)
@@ -136,31 +307,33 @@ class BridgeServer(Star):
             return f"提交异常：{e}"
         if not task_id:
             return "提交失败：未拿到 task_id"
-        self.table.add(task_id, agent, prompt, session)
+        cid = await self._cur_cid(event)
+        self.table.add(task_id, agent, prompt, session, conversation_id=cid)
         return f"已提交 [{agent}] {task_id}，稍后播报进度"
 
-    async def _list_tasks(self):
-        try:
-            tasks = await self.dispatch.list_tasks()
-        except Exception as e:
-            logger.warning("[桥服务] list 失败：%s", e)
-            return f"获取任务列表失败：{e}"
-        if not tasks:
-            return "远端暂无任务记录"
+    async def _list_tasks(self, event):
+        cid = await self._cur_cid(event)
+        recs = self.table.conversation_tasks(cid)
+        if not recs:
+            return "当前任务会话暂无任务，用 /nt 建一个"
         lines = []
-        for t in tasks[:20]:
-            lines.append(
-                f"{t.get('task_id')} [{t.get('agent')}] {t.get('status')} "
-                f"{(t.get('prompt') or '')[:40]}"
-            )
-        return "任务列表：\n" + "\n".join(lines)
+        for r in recs[:20]:
+            lines.append(f"{r.task_id} [{r.agent}] {r.status} {(r.prompt or '')[:40]}")
+        return "任务列表（当前会话）：\n" + "\n".join(lines)
 
     async def _watch_progress(self, event, message):
-        session = self._session(event)
+        cid = await self._cur_cid(event)
         tid = (message or "").strip()
-        rec = self.table.get(tid) if tid else self.table.recent_for(session)
-        if rec is None:
-            return "找不到任务，先 /wl 看看 task_id"
+        if tid:
+            rec = self.table.get(tid)
+            if rec is None:
+                return "找不到该任务"
+            if rec.conversation_id and rec.conversation_id != cid:
+                return "该任务不属于当前任务会话"
+        else:
+            rec = self.table.recent_for_conversation(cid)
+            if rec is None:
+                return "当前任务会话没有任务，用 /nt 建一个"
         await self._poll_one(rec)
         return (
             f"任务 {rec.task_id} [{rec.agent}] 状态：{rec.status}，"
@@ -171,6 +344,12 @@ class BridgeServer(Star):
         tid = (message or "").strip()
         if not tid:
             return "用法：/wx <task_id>"
+        cid = await self._cur_cid(event)
+        rec = self.table.get(tid)
+        if rec is None:
+            return "找不到该任务"
+        if rec.conversation_id and rec.conversation_id != cid:
+            return "该任务不属于当前任务会话"
         try:
             await self.dispatch.cancel(tid)
         except Exception as e:

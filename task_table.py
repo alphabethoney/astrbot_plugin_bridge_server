@@ -20,6 +20,7 @@ class TaskRecord:
     agent: str = ""
     prompt: str = ""
     session: str = ""          # 触发该任务的聊天会话（unified_msg_origin）
+    conversation_id: str = ""  # 归属的任务对话（conversation_id）
     status: str = "queued"     # 服务端已知的远端状态
     last_seq: int = 0          # 最后读到的远端事件 seq（增量游标）
     created: float = field(default_factory=time.time)
@@ -35,6 +36,7 @@ class TaskTable:
     def __init__(self, path=None):
         self._tasks = {}          # task_id -> TaskRecord
         self._session_tasks = {}  # session -> [task_id...]，最新在前
+        self._conversation_tasks = {}  # conversation_id -> [task_id...]，最新在前
         if path is None:
             path = os.path.join(
                 os.path.dirname(os.path.abspath(__file__)), "task_table.json"
@@ -48,6 +50,7 @@ class TaskTable:
             data = {
                 "tasks": {tid: asdict(r) for tid, r in self._tasks.items()},
                 "session_tasks": self._session_tasks,
+                "conversation_tasks": self._conversation_tasks,
             }
             tmp = self._path + ".tmp"
             with open(tmp, "w", encoding="utf-8") as f:
@@ -71,15 +74,21 @@ class TaskTable:
             self._session_tasks = {
                 k: list(v) for k, v in data.get("session_tasks", {}).items()
             }
+            self._conversation_tasks = {
+                k: list(v) for k, v in data.get("conversation_tasks", {}).items()
+            }
         except Exception:
             self._tasks = {}
             self._session_tasks = {}
+            self._conversation_tasks = {}
 
     # ---------------------------------------------------------------- 增改查
-    def add(self, task_id, agent, prompt, session) -> TaskRecord:
-        rec = TaskRecord(task_id=task_id, agent=agent, prompt=prompt, session=session)
+    def add(self, task_id, agent, prompt, session, conversation_id="") -> TaskRecord:
+        rec = TaskRecord(task_id=task_id, agent=agent, prompt=prompt,
+                         session=session, conversation_id=conversation_id)
         self._tasks[task_id] = rec
         self._session_tasks.setdefault(session, []).insert(0, task_id)
+        self._conversation_tasks.setdefault(conversation_id, []).insert(0, task_id)
         self._save()
         return rec
 
@@ -112,6 +121,22 @@ class TaskTable:
             if rec is not None:
                 return rec
         return None
+
+    def recent_for_conversation(self, conversation_id):
+        """某任务对话最近提交的一个任务。"""
+        for tid in self._conversation_tasks.get(conversation_id, []):
+            rec = self._tasks.get(tid)
+            if rec is not None:
+                return rec
+        return None
+
+    def conversation_tasks(self, conversation_id):
+        """某任务对话的全部任务（最新在前）。"""
+        return [
+            self._tasks[t]
+            for t in self._conversation_tasks.get(conversation_id, [])
+            if t in self._tasks
+        ]
 
     def recent(self):
         """全局最近提交的一个任务。"""
