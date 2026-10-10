@@ -176,9 +176,7 @@ class BridgeServer(Star):
         except Exception as e:
             logger.warning("[桥服务] cancel 失败：%s", e)
             return f"取消失败：{e}"
-        rec = self.table.get(tid)
-        if rec is not None:
-            rec.status = "cancelled"
+        self.table.set_status(tid, "cancelled")
         return f"已请求取消 {tid}"
 
     # ---------------------------------------------------------------- 轮询与播报
@@ -246,6 +244,8 @@ class BridgeServer(Star):
             summary = self._apply_state(rec, state)
             if summary:
                 await self._say(rec, summary)
+
+        self.table.save()
 
     def _apply_state(self, rec, state):
         """把 _state 应用到任务记录，状态切到终态时返回一句总结。"""

@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
-"""任务表：维护服务端视角下的任务状态机与增量游标。
+"""任务表：维护服务端视角下的任务状态机与增量游标，并持久化到 JSON。
 
-目前只保存在内存里（插件进程生命周期内），重启即丢。重启后可以借助远端
-list/watch 重建，但要保证「最后读到的 seq」不丢、避免重复播报，需要把游标
-持久化到插件数据目录——TODO。
+重启后自动加载，避免重复播报与游标丢失；每次变更即时落盘。
 """
+import json
+import os
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 
 # 还在跑、需要继续轮询的状态
 ACTIVE = {"queued", "running"}
@@ -32,14 +32,55 @@ class TaskRecord:
 
 
 class TaskTable:
-    def __init__(self):
+    def __init__(self, path=None):
         self._tasks = {}          # task_id -> TaskRecord
         self._session_tasks = {}  # session -> [task_id...]，最新在前
+        if path is None:
+            path = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)), "task_table.json"
+            )
+        self._path = path
+        self.load()
 
+    # ---------------------------------------------------------------- 持久化
+    def _save(self):
+        try:
+            data = {
+                "tasks": {tid: asdict(r) for tid, r in self._tasks.items()},
+                "session_tasks": self._session_tasks,
+            }
+            tmp = self._path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False)
+            os.replace(tmp, self._path)
+        except Exception:
+            # 落盘失败不应影响任务调度本身
+            pass
+
+    def save(self):
+        """显式落盘（供调用方在直接改字段后调用）。"""
+        self._save()
+
+    def load(self):
+        try:
+            with open(self._path, encoding="utf-8") as f:
+                data = json.load(f)
+            self._tasks = {
+                tid: TaskRecord(**d) for tid, d in data.get("tasks", {}).items()
+            }
+            self._session_tasks = {
+                k: list(v) for k, v in data.get("session_tasks", {}).items()
+            }
+        except Exception:
+            self._tasks = {}
+            self._session_tasks = {}
+
+    # ---------------------------------------------------------------- 增改查
     def add(self, task_id, agent, prompt, session) -> TaskRecord:
         rec = TaskRecord(task_id=task_id, agent=agent, prompt=prompt, session=session)
         self._tasks[task_id] = rec
         self._session_tasks.setdefault(session, []).insert(0, task_id)
+        self._save()
         return rec
 
     def get(self, task_id):
@@ -56,11 +97,13 @@ class TaskTable:
         rec = self._tasks.get(task_id)
         if rec is not None:
             rec.status = status
+            self._save()
 
     def bump_seq(self, task_id, seq):
         rec = self._tasks.get(task_id)
         if rec is not None and seq > rec.last_seq:
             rec.last_seq = seq
+            self._save()
 
     def recent_for(self, session):
         """某会话最近提交的一个任务。"""
